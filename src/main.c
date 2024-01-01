@@ -8,6 +8,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 
+#include <sensor/drv2605/drv2605.h>
+
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   500
 
@@ -21,8 +23,10 @@
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
 
+/*
 #define DRV2605_NODE DT_NODELABEL(drv2605)
 static const struct i2c_dt_spec drv2605_device = I2C_DT_SPEC_GET(DRV2605_NODE);
+*/
 
 /**
  * DRV2605 LRA Driver
@@ -62,6 +66,8 @@ static const struct i2c_dt_spec drv2605_device = I2C_DT_SPEC_GET(DRV2605_NODE);
  * 8). If there is a short before waveform is played, must observe and perform cycling in Figure 16!
 */
 
+
+/*
 // DRV2605 registers
 uint8_t STATUS_REG = 0x00;
 uint8_t MODE_REG = 0x01;
@@ -87,37 +93,37 @@ bool DRV2605_Init() {
 		printk("failure before starting auto calibration");
 	}
 
-	/**
-	 * Perform auto-calibration
-	 * Steps: 
-	 * 0). Write 0x07 to register 0x01
-	 * 1). Set ERM_LRA bit of reg 0x1A
-	 * 2). Set FB_BRAKE_FACTOR bit field of reg 0x1A
-	 * 3). Set LOOP_GAIN bit field of reg 0x1A 
-	 * 	1-3). Value is 0b10101010
-	 * 4). Set RATED_VOLTAGE bit field of reg 0x16
-	 * 	4a). LRA used is the VG0832022D lra from Digikey
-	 * 	4b). Voltage of 1.8VAC RMS, frequency of 235Hz
-	 * 	4c). formula is Vrms = (20.71*10^-3 * RATED_VOLTAGE)/sqrt(1-(4*SAMPLE_TIME + 300 * 10^-6) * fLRA))
-	 * 	4d). SAMPLE_TIME is recommended to be 300uS
-	 * 	4e). RATED_VOLTAGE is 83.7524... which is 0x53
-	 * 5). Set OD_CLAMP bit field of reg 0x17
-	 * 	5a). Vclamp = 21.96 * 10^-3 * OD_CLAMP
-	 * 	5b). 1.8 = 21.96 * 10^-3 * OD_CLAMP
-	 * 	5c). OD_CLAMP = 81.967 = 0x52
-	 * 6). Set AUTO_CAL_TIME bit field of reg 0x1E
-	 * 	6a). 0b00110000
-	 * 7). Set DRIVE_TIME bit field of reg 0x1B
-	 * 	7a). drive time(ms) = 0.5 * LRA Period (0.00426s for 235 Hz) = 2.13ms
-	 * 	7b). 2.13ms = DRIVE_TIME * 0.1 + 0.5ms, so DRIVE_TIME = 16
-	 * 	7c). 0b10010000
-	 * 8). Set SAMPLE_TIME bit field of 0x1C
-	 * 9). Set BLANKING_TIME bit field of 0x1C
-	 * 10). Set IDISS_TIME bit field of 0x1C
-	 * 	8-10). 0b11110101 
-	 * 11). Set GO bit by writing 0x01 to register 0x0C - wait for GO bit to clear
-	 * 12). Check status of DIAG_RESULT of regiester 0x00 to ensure that calibration is complete without faults
-	*/
+	//
+	// Perform auto-calibration
+	// Steps: 
+	// 0). Write 0x07 to register 0x01
+	// 1). Set ERM_LRA bit of reg 0x1A
+	// 2). Set FB_BRAKE_FACTOR bit field of reg 0x1A
+	// 3). Set LOOP_GAIN bit field of reg 0x1A 
+	// 	1-3). Value is 0b10101010
+	// 4). Set RATED_VOLTAGE bit field of reg 0x16
+	// 	4a). LRA used is the VG0832022D lra from Digikey
+	// 	4b). Voltage of 1.8VAC RMS, frequency of 235Hz
+	// 	4c). formula is Vrms = (20.71*10^-3 * RATED_VOLTAGE)/sqrt(1-(4*SAMPLE_TIME + 300 * 10^-6) * fLRA))
+	// 	4d). SAMPLE_TIME is recommended to be 300uS
+	// 	4e). RATED_VOLTAGE is 83.7524... which is 0x53
+	// 5). Set OD_CLAMP bit field of reg 0x17
+	// 	5a). Vclamp = 21.96 * 10^-3 * OD_CLAMP
+	// 	5b). 1.8 = 21.96 * 10^-3 * OD_CLAMP
+	// 	5c). OD_CLAMP = 81.967 = 0x52
+	// 6). Set AUTO_CAL_TIME bit field of reg 0x1E
+	// 	6a). 0b00110000
+	// 7). Set DRIVE_TIME bit field of reg 0x1B
+	// 	7a). drive time(ms) = 0.5 * LRA Period (0.00426s for 235 Hz) = 2.13ms
+	// 	7b). 2.13ms = DRIVE_TIME * 0.1 + 0.5ms, so DRIVE_TIME = 16
+	// 	7c). 0b10010000
+	// 8). Set SAMPLE_TIME bit field of 0x1C
+	// 9). Set BLANKING_TIME bit field of 0x1C
+	// 10). Set IDISS_TIME bit field of 0x1C
+	// 	8-10). 0b11110101 
+	// 11). Set GO bit by writing 0x01 to register 0x0C - wait for GO bit to clear
+	// 12). Check status of DIAG_RESULT of regiester 0x00 to ensure that calibration is complete without faults
+	//
 
 	// step 0: put device in auto-calibration mode
 	i2c_operation_error = i2c_reg_write_byte_dt(&drv2605_device, MODE_REG, 0x07);
@@ -280,20 +286,23 @@ bool DRV2605_EmitWaveform(uint8_t waveform_index) {
 	
 	return true;
 }
+*/
 
 int main(void)
-{
+{       
+    const struct device* drv2605_dev = DEVICE_DT_GET_ANY(ti_drv2605);
 
 	if (!device_is_ready(led.port)) {
                 printk("failure at initializing led device\r\n");
 		return 1;
 	}
 
-
+	/*
 	if (!device_is_ready(drv2605_device.bus)) {
                 printk("failure at initializing i2c device\r\n");
 	        return 1;
 	}
+	*/
 
 	int ret = gpio_pin_configure_dt(&led, GPIO_OUTPUT_ACTIVE);
 	if (ret < 0) {
@@ -301,6 +310,7 @@ int main(void)
 		return 1;
 	}
 
+        /*
         printk("starting haptics initialization \r\n");
 
 	bool init_haptics = DRV2605_Init();
@@ -308,8 +318,10 @@ int main(void)
 		printk("trouble initializing haptics driver\r\n");
                 return 1;
 	}
+        */
         
         uint8_t index = 1;
+        struct sensor_value sensor = {.val1 = index, .val2 = 0};
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
@@ -317,12 +329,18 @@ int main(void)
 			return 1;
 		}
 		
-		bool trigger_haptics = DRV2605_EmitWaveform(index);
-		if(!trigger_haptics) {
+                
+                int dev_ret = sensor_attr_set(drv2605_dev, 
+                                              EMIT_WAVEFORM_NUM, 
+                                              EMIT_WAVEFORM_START, 
+                                              &sensor);
+
+		//bool trigger_haptics = DRV2605_EmitWaveform(index);
+		if(dev_ret < 0) {
 			printk("trouble trigger haptics driver");
 		} else {
-			index = (index + 1) % 124;
-			printk("beeping at index %d \r\n", index);
+			printk("beeping at index %d \r\n", sensor.val1);
+                        sensor.val1 = (sensor.val1 + 1) % 124;
 		}
 
 		k_msleep(SLEEP_TIME_MS);

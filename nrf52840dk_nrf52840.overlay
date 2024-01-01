@@ -12,10 +12,21 @@
 // You can also visit the nRF DeviceTree extension documentation at https://nrfconnect.github.io/vscode-nrf-connect/devicetree/nrfdevicetree.html
 
 &i2c0 {
+    /*
     drv2605: drv2605@5a{
         compatible = "i2c-device";
         reg = < 0x5a >;
         label = "haptic driver";
+    };
+    */
+
+    haptic: haptic@5a{
+        compatible = "ti,drv2605";
+        reg = <0x5a>;
+        motor_type = <0>;
+        motor_frequency = <235>;
+        motor_voltagerms = <0>;
+        status = "okay";
     };
 };
 

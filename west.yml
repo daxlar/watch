@@ -12,3 +12,7 @@ manifest:
       import:
         path-prefix: external
       clone-depth: 1
+    - name: DRV2605
+      path: modules/DRV2605
+      revision: refs/tags/initial_3
+      url: https://github.com/daxlar/drv2605
