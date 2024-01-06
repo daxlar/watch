@@ -40,25 +40,56 @@ bool sw1_value = false;
 
 /// ADD DEBOUNCING HERE
 void button_task(void* p1, void* p2, void* p3) {
-	printk("i'm here at the button task");
-
-	if(sw0_value) {
-		sw0_value = false;
-		gpio_pin_interrupt_configure_dt(&sw0, GPIO_INT_EDGE_TO_ACTIVE);
-		printk("re-enabling sw0");
-	}
-
-	if(sw1_value) {
-		sw1_value = false;
-		gpio_pin_interrupt_configure_dt(&sw1, GPIO_INT_EDGE_TO_ACTIVE);
-		printk("re-enabling sw1");
-	}
+	printk("i'm here at the button task \r\n");
 
 	/// LOGIC
 	/// check if both buttons have been held for 2 seconds
 	/// if they have, enter time settings
 	/// one button to increase, one button to decrease, press both to confirm the hours
-	/// repeat this process for minutes
+	/// repeat this process for minutesvv
+	
+	volatile uint32_t port_raw_value = 0;
+	volatile uint32_t sw0_raw_value = 0;
+	volatile uint32_t sw1_raw_value = 0;
+
+	uint32_t cur_time = k_cyc_to_ms_ceil32(k_cycle_get_32());
+	printk("cur_time: %d \r\n", cur_time);
+	uint32_t buffer_end_time = cur_time + 5000;
+
+	while(buffer_end_time > cur_time) {
+		cur_time = k_cyc_to_ms_ceil32(k_cycle_get_32());
+	}
+
+	uint32_t end_time = cur_time + 5000;
+	bool failed_hold = false;
+	
+	while((!sw0_raw_value && !sw1_raw_value) && (cur_time < end_time)) {
+		cur_time = k_cyc_to_ms_ceil32(k_cycle_get_32());
+		gpio_port_get_raw(sw0.port, &port_raw_value);
+		sw0_raw_value = (port_raw_value >> 11) & 0x1;
+		sw1_raw_value = (port_raw_value >> 12) & 0x1;
+		if(sw0_raw_value || sw1_raw_value) {
+			printk("failed the hold");
+			failed_hold = true;
+			break;
+		}
+	}
+
+	if(!failed_hold) {
+		printk("got the hold - port value is: %d \r\n" , sw0_raw_value);
+	}
+	
+	if(sw0_value) {
+		sw0_value = false;
+		gpio_pin_interrupt_configure_dt(&sw0, GPIO_INT_EDGE_TO_ACTIVE);
+		printk("re-enabling sw0 \r\n");
+	}
+
+	if(sw1_value) {
+		sw1_value = false;
+		gpio_pin_interrupt_configure_dt(&sw1, GPIO_INT_EDGE_TO_ACTIVE);
+		printk("re-enabling sw1 \r\n");
+	}
 
 	button_thread_active = false;
 }
