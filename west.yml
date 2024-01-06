@@ -14,5 +14,5 @@ manifest:
       clone-depth: 1
     - name: DRV2605
       path: modules/DRV2605
-      revision: refs/tags/initial_3
+      revision: refs/tags/barebones
       url: https://github.com/daxlar/drv2605
