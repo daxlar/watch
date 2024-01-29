@@ -9,6 +9,7 @@
 #include <zephyr/drivers/i2c.h>
 
 #include <sensor/drv2605/drv2605.h>
+#include <sensor/pca9548/pca9548.h>
 
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   500
@@ -56,7 +57,7 @@ void sw1_pressed_task(const struct device *dev, struct gpio_callback *cb, uint32
 	sw1_pressed_time_stamp = k_cyc_to_ms_ceil32(k_cycle_get_32());
 }
 
-void initialize_switches() {
+int initialize_switches() {
 	int ret;
 
 	ret = gpio_pin_configure_dt(&sw0, GPIO_INPUT);
@@ -93,7 +94,7 @@ void initialize_switches() {
 	gpio_init_callback(&sw1_cb_data, sw1_pressed_task, BIT(sw1.pin));
 	gpio_add_callback(sw1.port, &sw1_cb_data);
 
-	return;
+	return 0;
 }
 
 /// ADD DEBOUNCING HERE
@@ -121,7 +122,7 @@ void button_task(void* p1, void* p2, void* p3) {
 
 				#define DOUBLE_PRESS_DURATION_MS 2000
 
-				volatile uint32_t port_raw_value = 0;
+				uint32_t port_raw_value = 0;
 				volatile uint32_t sw0_raw_value = 0;
 				volatile uint32_t sw1_raw_value = 0;
 
@@ -292,9 +293,59 @@ void button_task(void* p1, void* p2, void* p3) {
 	}
 }
 
+int initialize_haptic(const struct device* pca9548_dev, const struct device* drv2605_dev, enum pca9548_channel channel_number) {
+	int open_channel = sensor_attr_set(pca9548_dev, channel_number, CHANNEL_OPEN, NULL);
+	if(open_channel < 0) {
+		printk("trouble setting channel i2cmux driver \r\n");
+		return -ENODEV;
+	}
+
+	struct sensor_value initialization_values = {.val1 = 0, .val2 = 0};
+	int trigger_waveform = sensor_attr_set(drv2605_dev, INITIALIZE, INITIALIZE_START, &initialization_values);
+	if(trigger_waveform < 0) {
+		printk("trouble initializing haptics driver \r\n");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+int activate_haptic(const struct device* pca9548_dev, const struct device* drv2605_dev, enum pca9548_channel channel_number) {
+
+	int open_channel = sensor_attr_set(pca9548_dev, channel_number, CHANNEL_OPEN, NULL);
+	if(open_channel < 0) {
+		printk("trouble setting channel i2cmux driver \r\n");
+		return -ENODEV;
+	}
+
+	struct sensor_value haptic_waveform_number = {.val1 = 14, .val2 = 0};
+	int trigger_waveform = sensor_attr_set(drv2605_dev, EMIT_WAVEFORM, EMIT_WAVEFORM_START, &haptic_waveform_number);
+	if(trigger_waveform < 0) {
+		printk("trouble triggering haptics driver \r\n");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
+int initialize_haptics(const struct device* pca9548_dev, const struct device* drv2605_dev) {
+	for(uint8_t i = CHANNEL_ZERO; i < CHANNEL_SIX; i = i<<1) {
+		printk("at: %d \r\n", i);
+		int init_status = initialize_haptic(pca9548_dev, drv2605_dev, i);
+		if(init_status < 0) {
+			printk("trouble initializing haptics at: %d \r\n", i);
+			return -ENODEV;
+		}
+	}
+
+	return 0;
+
+}
+
 int main(void)
 {       
     const struct device* drv2605_dev = DEVICE_DT_GET_ANY(ti_drv2605);
+	const struct device* pca9548_dev = DEVICE_DT_GET_ANY(ti_pca9548);
 
 	if (!device_is_ready(led.port)) {
         printk("failure at initializing led device\r\n");
@@ -313,30 +364,42 @@ int main(void)
 										NULL, NULL, NULL,
 										BUTTON_THREAD_PRIORITY, 0, K_NO_WAIT);
 
-	initialize_switches();
+	int init_switches = initialize_switches();
+	if(init_switches < 0) {
+		printk("problems initializing switches \r\n");
+	} else {
+		printk("switches are initialized \r\n");
+	}
 
-	printk("switches are initialized \r\n");
+	k_msleep(SLEEP_TIME_MS * 4);
+	
 
-    uint8_t index = 1;
-    struct sensor_value sensor = {.val1 = index, .val2 = 0};
+	int init_haptics = initialize_haptics(pca9548_dev, drv2605_dev);
+	while(init_haptics < 0) {
+		if(init_haptics < 0) {
+			printk("trying to initialize haptics again \r\n");
+			k_msleep(SLEEP_TIME_MS);
+			init_haptics = initialize_haptics(pca9548_dev, drv2605_dev);
+		} 
+	}
+	
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
             printk("failure at toggling led device\r\n");
 			return 1;
 		}
-		/*
-		int dev_ret = sensor_attr_set(drv2605_dev, 
-									  EMIT_WAVEFORM_NUM, 
-									  EMIT_WAVEFORM_START, 
-									  &sensor);
-
-		if(dev_ret < 0) {
-			printk("trouble trigger haptics driver");
-		} else {
-            sensor.val1 = (sensor.val1 + 1) % 124;
+		
+		for(uint8_t i = CHANNEL_ZERO; i < CHANNEL_SIX; i = i<<1) {
+			int active_status = activate_haptic(pca9548_dev, drv2605_dev, i);
+			if(active_status < 0) {
+				printk("trouble triggering haptics at: %d \r\n", i);
+			} else {
+				printk("haptics at: %d is active \r\n", i);
+			}
+			k_msleep(SLEEP_TIME_MS);
 		}
-		*/
+		
 		k_msleep(SLEEP_TIME_MS);
 	}
 

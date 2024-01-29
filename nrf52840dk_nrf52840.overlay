@@ -28,6 +28,12 @@
         motor_voltagerms = <0>;
         status = "okay";
     };
+
+    i2cmux: i2cmux@70{
+        compatible = "ti,pca9548";
+        reg = <0x70>;
+        status = "okay";
+    };
 };
 
 &wdt0 {
