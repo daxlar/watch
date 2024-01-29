@@ -18,5 +18,5 @@ manifest:
       url: https://github.com/daxlar/drv2605
     - name: PCA9548
       path: modules/PCA9548
-      revision: refs/tags/initial
+      revision: refs/tags/barebones
       url: https://github.com/daxlar/pca9548
