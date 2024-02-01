@@ -22,6 +22,6 @@ manifest:
       url: https://github.com/daxlar/pca9548
     - name: ADXL343
       path: modules/ADXL343
-      revision: refs/tags/initial
+      revision: refs/tags/barebones
       url: https://github.com/daxlar/adxl343
 
