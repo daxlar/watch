@@ -19,7 +19,7 @@
         label = "haptic driver";
     };
     */
-
+    /*
     haptic: haptic@5a{
         compatible = "ti,drv2605";
         reg = <0x5a>;
@@ -32,6 +32,13 @@
     i2cmux: i2cmux@70{
         compatible = "ti,pca9548";
         reg = <0x70>;
+        status = "okay";
+    };
+    */
+
+    accel: accel@053{
+        compatible = "adi,adxl343";
+        reg = <0x53>;
         status = "okay";
     };
 };

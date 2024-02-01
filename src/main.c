@@ -8,6 +8,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 
+#include <sensor/adxl343/adxl343.h>
 #include <sensor/drv2605/drv2605.h>
 #include <sensor/pca9548/pca9548.h>
 
@@ -28,9 +29,12 @@ struct k_thread button_thread_data;
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 static const struct gpio_dt_spec sw0 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 static const struct gpio_dt_spec sw1 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
+static const struct device* adxl343_dev = DEVICE_DT_GET_ANY(adi_adxl343);
+static const struct device* gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 
 static struct gpio_callback sw0_cb_data;
 static struct gpio_callback sw1_cb_data;
+static struct gpio_callback acc_cb_data;
 
 static k_tid_t button_task_tid;
 
@@ -342,10 +346,23 @@ int initialize_haptics(const struct device* pca9548_dev, const struct device* dr
 
 }
 
+int initialize_accelerometer(const struct device* adxl343_dev) {
+
+	struct sensor_value dummy_data = {.val1 = 0, .val2 = 0};
+	return sensor_attr_set(adxl343_dev, ADXL343_INITIALIZE, ADXL343_INITIALIZE_START, &dummy_data);
+}
+
+int toggle_clear_int = 0;
+
+void acc_trigger_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+	printk("accel double tap trigger! \r\n");
+	toggle_clear_int = 1;
+}
+
 int main(void)
 {       
-    const struct device* drv2605_dev = DEVICE_DT_GET_ANY(ti_drv2605);
-	const struct device* pca9548_dev = DEVICE_DT_GET_ANY(ti_pca9548);
+    //const struct device* drv2605_dev = DEVICE_DT_GET_ANY(ti_drv2605);
+	//const struct device* pca9548_dev = DEVICE_DT_GET_ANY(ti_pca9548);
 
 	if (!device_is_ready(led.port)) {
         printk("failure at initializing led device\r\n");
@@ -371,9 +388,30 @@ int main(void)
 		printk("switches are initialized \r\n");
 	}
 
-	k_msleep(SLEEP_TIME_MS * 4);
-	
+	int init_accelerometer = initialize_accelerometer(adxl343_dev);
+	if(init_accelerometer < 0) {
+		printk("problems initializing accelerometer \r\n");
+	} else {
+		printk("accelerometer is initialized \r\n");
+	}
 
+	int configure_gpio = gpio_pin_configure(gpio0_dev, 28, GPIO_INPUT);
+	if(configure_gpio < 0) {
+		printk("can't configure accel int pin \r\n");
+	}
+
+	configure_gpio = gpio_pin_interrupt_configure(gpio0_dev, 28, GPIO_INT_EDGE_TO_ACTIVE);
+	if (configure_gpio < 0) {
+		printk("Failed to configure interrupt for accel pin \r\n");
+	}
+
+	gpio_init_callback(&acc_cb_data, acc_trigger_task, BIT(28));
+	configure_gpio = gpio_add_callback(gpio0_dev, &acc_cb_data);
+	if (configure_gpio < 0) {
+		printk("Failed to add callback for accel pin \r\n");
+	}
+
+	/*
 	int init_haptics = initialize_haptics(pca9548_dev, drv2605_dev);
 	while(init_haptics < 0) {
 		if(init_haptics < 0) {
@@ -382,6 +420,7 @@ int main(void)
 			init_haptics = initialize_haptics(pca9548_dev, drv2605_dev);
 		} 
 	}
+	*/
 	
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
@@ -389,7 +428,13 @@ int main(void)
             printk("failure at toggling led device\r\n");
 			return 1;
 		}
-		
+
+		if(toggle_clear_int == 1) {
+			struct sensor_value dummy_data = {.val1 = 0, .val2 = 0};
+			sensor_attr_set(adxl343_dev, INTERRUPT, INTERRUPT_CLEAR, &dummy_data);
+			toggle_clear_int = 0;
+		}
+		/*
 		for(uint8_t i = CHANNEL_ZERO; i < CHANNEL_SIX; i = i<<1) {
 			int active_status = activate_haptic(pca9548_dev, drv2605_dev, i);
 			if(active_status < 0) {
@@ -399,6 +444,7 @@ int main(void)
 			}
 			k_msleep(SLEEP_TIME_MS);
 		}
+		*/
 		
 		k_msleep(SLEEP_TIME_MS);
 	}
