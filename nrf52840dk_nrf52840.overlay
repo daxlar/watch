@@ -34,11 +34,16 @@
         reg = <0x70>;
         status = "okay";
     };
-    */
-
+    
     accel: accel@053{
         compatible = "adi,adxl343";
         reg = <0x53>;
+        status = "okay";
+    };
+    */
+    rtclock: rtclock@32{
+        compatible = "mc,rv8803";
+        reg = <0x32>;
         status = "okay";
     };
 };

@@ -7,10 +7,12 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
+#include <zephyr/timing/timing.h>
 
 #include <sensor/adxl343/adxl343.h>
 #include <sensor/drv2605/drv2605.h>
 #include <sensor/pca9548/pca9548.h>
+#include <sensor/rv8803/rv8803.h>
 
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   500
@@ -22,27 +24,37 @@
 
 #define BUTTON_THREAD_STACK_SIZE 500
 #define BUTTON_THREAD_PRIORITY 5
+#define RTC_THREAD_STACK_SIZE 500
+#define RTC_THREAD_PRIORITY 5
 
 K_THREAD_STACK_DEFINE(button_thread_stack_area, BUTTON_THREAD_STACK_SIZE);
 struct k_thread button_thread_data;
 
+K_THREAD_STACK_DEFINE(rtc_thread_stack_area, RTC_THREAD_STACK_SIZE);
+struct k_thread rtc_thread_data;
+
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 static const struct gpio_dt_spec sw0 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 static const struct gpio_dt_spec sw1 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
-static const struct device* adxl343_dev = DEVICE_DT_GET_ANY(adi_adxl343);
+//static const struct device* adxl343_dev = DEVICE_DT_GET_ANY(adi_adxl343);
 static const struct device* gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
+static const struct device* rv8803_dev = DEVICE_DT_GET_ANY(mc_rv8803);
 
 static struct gpio_callback sw0_cb_data;
 static struct gpio_callback sw1_cb_data;
-static struct gpio_callback acc_cb_data;
+//static struct gpio_callback acc_cb_data;
+static struct gpio_callback clk_cb_data;
 
 static k_tid_t button_task_tid;
+static k_tid_t rtc_task_tid;
 
 K_SEM_DEFINE(a_switch_was_pressed, 0, 1);
 bool sw0_was_pressed = false;
 bool sw1_was_pressed = false;
 uint32_t sw0_pressed_time_stamp = 0;
 uint32_t sw1_pressed_time_stamp = 0;
+
+K_SEM_DEFINE(final_time_stamp, 0, 1);
 
 
 void sw0_pressed_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
@@ -297,6 +309,7 @@ void button_task(void* p1, void* p2, void* p3) {
 	}
 }
 
+/*
 int initialize_haptic(const struct device* pca9548_dev, const struct device* drv2605_dev, enum pca9548_channel channel_number) {
 	int open_channel = sensor_attr_set(pca9548_dev, channel_number, CHANNEL_OPEN, NULL);
 	if(open_channel < 0) {
@@ -358,6 +371,153 @@ void acc_trigger_task(const struct device *dev, struct gpio_callback *cb, uint32
 	printk("accel double tap trigger! \r\n");
 	toggle_clear_int = 1;
 }
+*/
+
+int set_time(const struct device* rv8803_dev, int hours, int minutes) {
+
+	struct sensor_value time = {.val1 = hours, .val2 = minutes};
+	return sensor_attr_set(rv8803_dev, RV8803_SET_TIME, RV8803_SET_TIME_START, &time);
+}
+
+int get_time(const struct device* rv8803_dev, uint8_t* hours, uint8_t* minutes) {
+
+	struct sensor_value time;
+	int getting_time_error = sensor_channel_get(rv8803_dev, RV8803_GET_TIME, &time);
+	if(getting_time_error) {
+		printk("trouble getting time \r\n");
+		return -ENODEV;
+	}
+
+	*hours = time.val1;
+	*minutes = time.val2;
+	return 0;
+}
+
+
+timing_t time_stamp1 = 0;
+timing_t time_stamp2 = 0;
+volatile bool time_stamp1_got = false;
+volatile bool time_stamp2_got = false;
+
+volatile bool found_first_inactive = false;
+
+void clkout_edge_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+
+	if(found_first_inactive == false) {
+		found_first_inactive = true;
+		int configure_gpio = gpio_pin_interrupt_configure(gpio0_dev, 4, GPIO_INT_EDGE_TO_ACTIVE);
+		if (configure_gpio < 0) {
+			printk("Failed to configure active interrupt for clkout pin \r\n");
+		} else {
+			printk("setting active interrupt \r\n");
+		}
+	} else if(time_stamp1_got == false) {
+		time_stamp1 = timing_counter_get();
+		//printk("time stamp 1: %d \r\n", time_stamp1);
+		time_stamp1_got = true;
+	} else if(time_stamp2_got == false ){
+		time_stamp2 = timing_counter_get();
+		//printk("time stamp 2: %d \r\n", time_stamp2);
+		time_stamp2_got = true;
+		k_sem_give(&final_time_stamp);
+	} else {
+
+	}
+}
+
+void initialize_rtc() {
+
+	timing_init();
+	timing_start();
+
+	// use port 0 pin 24 for CLKOE
+	// use port 0 pin 4 for CLKOUT
+	struct sensor_value dummy;
+	int start_offset_calc = sensor_attr_set(rv8803_dev, RV8803_INITIALIZE, RV8803_INITIALIZE_START, &dummy);
+	if(start_offset_calc) {
+		printk("having trouble starting offset calc! \r\n");
+	}
+
+	int configure_gpio = gpio_pin_configure(gpio0_dev, 24, GPIO_OUTPUT);
+	if(configure_gpio < 0) {
+		printk("can't configure clkoe pin \r\n");
+	}
+
+	gpio_pin_set(gpio0_dev, 24, 1);
+	
+	configure_gpio = gpio_pin_configure(gpio0_dev, 4, GPIO_INPUT);
+	if(configure_gpio < 0) {
+		printk("can't configure clkout pin \r\n");
+	}
+
+	configure_gpio = gpio_pin_interrupt_configure(gpio0_dev, 4, GPIO_INT_EDGE_TO_INACTIVE);
+	if (configure_gpio < 0) {
+		printk("Failed to configure interrupt for clkout pin \r\n");
+	}
+
+	gpio_init_callback(&clk_cb_data, clkout_edge_task, BIT(4));
+	configure_gpio = gpio_add_callback(gpio0_dev, &clk_cb_data);
+	if (configure_gpio < 0) {
+		printk("Failed to add callback for clkout pin \r\n");
+	}
+
+}
+
+void rtc_task(void* p1, void* p2, void* p3) {
+
+	printk("rtc task is active! \r\n");
+
+	k_sem_take(&final_time_stamp, K_FOREVER);
+
+	gpio_pin_set(gpio0_dev, 24, 0);
+
+	// WARNING THIS WILL NOT WORK WITHOUT A 64-bit timer!
+	// max value of uint32_t is 4,294,967,295. assuming clock speed of 80MHz, aka 12.5 ns per tick
+	// we are looking at a 53 second window before the clock rolls over.
+	// it's entirely possible to hit the end of this window within a 1s bound :(
+	
+	/*
+	uint64_t total_ns = timing_cycles_get(&time_stamp1, &time_stamp2);
+	uint64_t time_diff_ns = timing_cycles_to_ns(total_ns);
+	printk("time diff: %d \r\n", time_diff_ns);
+	double time_diff_hz = 1.0/(time_diff_ns / 1000000000.0);
+	double offset = ((time_diff_hz - 1) * 1000000.0)/0.2384;
+	printk("offset: %d \r\n", (int)offset);
+
+	struct sensor_value calib_offset = {.val1 = offset, .val2 = 0};
+	int set_offset = sensor_attr_set(rv8803_dev, RV8803_INITIALIZE, RV8803_INITIALIZE_COMPUTE_OFFSET, &calib_offset);
+	if(set_offset) {
+		printk("having trouble starting offset calc! \r\n");
+	} else {
+		printk("set offset! \r\n");
+	}
+	*/
+
+	int set_time_val = set_time(rv8803_dev, 21, 21);
+	if(set_time_val) {
+		printk("trouble setting the time \r\n");
+	} else {
+		printk("set the time! \r\n");
+	}
+	
+	#define TIME_SLEEP_DURATION_MS 60 * 1000
+	while(1) {
+		uint8_t hours = 0;
+		uint8_t minutes = 0;
+
+		int get_time_error = get_time(rv8803_dev, &hours, &minutes);
+		if(get_time_error) {
+			printk("error at getting time \r\n");
+		} else {
+			printk("hours: %d, minutes %d \r\n", hours, minutes);
+		}
+		k_msleep(TIME_SLEEP_DURATION_MS);
+	}
+	
+	while(1) {
+		k_msleep(1000);
+	}
+}
 
 int main(void)
 {       
@@ -388,6 +548,15 @@ int main(void)
 		printk("switches are initialized \r\n");
 	}
 
+	rtc_task_tid = k_thread_create(&rtc_thread_data, rtc_thread_stack_area,
+										K_THREAD_STACK_SIZEOF(rtc_thread_stack_area),
+										rtc_task,
+										NULL, NULL, NULL,
+										RTC_THREAD_PRIORITY, 0, K_NO_WAIT);
+
+	initialize_rtc();
+
+	/*
 	int init_accelerometer = initialize_accelerometer(adxl343_dev);
 	if(init_accelerometer < 0) {
 		printk("problems initializing accelerometer \r\n");
@@ -395,6 +564,8 @@ int main(void)
 		printk("accelerometer is initialized \r\n");
 	}
 
+	// pin 28 for accel int
+	// should there be a pull-down here? Doesn't work if added
 	int configure_gpio = gpio_pin_configure(gpio0_dev, 28, GPIO_INPUT);
 	if(configure_gpio < 0) {
 		printk("can't configure accel int pin \r\n");
@@ -410,8 +581,7 @@ int main(void)
 	if (configure_gpio < 0) {
 		printk("Failed to add callback for accel pin \r\n");
 	}
-
-	/*
+	
 	int init_haptics = initialize_haptics(pca9548_dev, drv2605_dev);
 	while(init_haptics < 0) {
 		if(init_haptics < 0) {
@@ -422,6 +592,7 @@ int main(void)
 	}
 	*/
 	
+	#define SLEEP_DURATION_MS 1000
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
@@ -429,11 +600,13 @@ int main(void)
 			return 1;
 		}
 
+		/*
 		if(toggle_clear_int == 1) {
 			struct sensor_value dummy_data = {.val1 = 0, .val2 = 0};
 			sensor_attr_set(adxl343_dev, INTERRUPT, INTERRUPT_CLEAR, &dummy_data);
 			toggle_clear_int = 0;
 		}
+		*/
 		/*
 		for(uint8_t i = CHANNEL_ZERO; i < CHANNEL_SIX; i = i<<1) {
 			int active_status = activate_haptic(pca9548_dev, drv2605_dev, i);
@@ -444,9 +617,10 @@ int main(void)
 			}
 			k_msleep(SLEEP_TIME_MS);
 		}
-		*/
 		
 		k_msleep(SLEEP_TIME_MS);
+		*/
+		k_msleep(SLEEP_DURATION_MS);
 	}
 
     return 0;

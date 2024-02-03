@@ -24,4 +24,8 @@ manifest:
       path: modules/ADXL343
       revision: refs/tags/barebones
       url: https://github.com/daxlar/adxl343
+    - name: RV8803
+      path: modules/RV8803
+      revision: refs/tags/initial
+      url: https://github.com/daxlar/rv8803
 
