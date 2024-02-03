@@ -51,3 +51,10 @@
 &wdt0 {
     status = "disabled";
 };
+
+/*
+// for the rtc calibration
+&timer0 {
+    status = "okay";
+};
+*/

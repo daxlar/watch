@@ -14,6 +14,8 @@
 #include <sensor/pca9548/pca9548.h>
 #include <sensor/rv8803/rv8803.h>
 
+//#include <nrfx_timer.h>
+
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   500
 
@@ -56,6 +58,7 @@ uint32_t sw1_pressed_time_stamp = 0;
 
 K_SEM_DEFINE(final_time_stamp, 0, 1);
 
+//nrfx_timer_t timer_t_inst = NRFX_TIMER_INSTANCE(0);
 
 void sw0_pressed_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
 	printk("Button pressed at sw0: %" PRIu32 "\n", k_cycle_get_32());
@@ -394,8 +397,11 @@ int get_time(const struct device* rv8803_dev, uint8_t* hours, uint8_t* minutes) 
 }
 
 
-timing_t time_stamp1 = 0;
-timing_t time_stamp2 = 0;
+//timing_t start_time;
+//timing_t end_time;
+
+//uint32_t start_time_val;
+//uint32_t end_time_val;
 volatile bool time_stamp1_got = false;
 volatile bool time_stamp2_got = false;
 
@@ -412,11 +418,17 @@ void clkout_edge_task(const struct device *dev, struct gpio_callback *cb, uint32
 			printk("setting active interrupt \r\n");
 		}
 	} else if(time_stamp1_got == false) {
-		time_stamp1 = timing_counter_get();
+		//start_time = timing_counter_get();
+		//start_time = k_cyc_to_ns_ceil32(k_cycle_get_32());
+		//start_time_val = nrfx_timer_capture(&timer_t_inst, NRF_TIMER_CC_CHANNEL0);
+		gpio_pin_toggle(gpio0_dev, 25);
 		//printk("time stamp 1: %d \r\n", time_stamp1);
 		time_stamp1_got = true;
 	} else if(time_stamp2_got == false ){
-		time_stamp2 = timing_counter_get();
+		//end_time = timing_counter_get();
+		//end_time = k_cyc_to_ns_ceil32(k_cycle_get_32());
+		//end_time_val = nrfx_timer_capture(&timer_t_inst, NRF_TIMER_CC_CHANNEL1);
+		gpio_pin_toggle(gpio0_dev, 25);
 		//printk("time stamp 2: %d \r\n", time_stamp2);
 		time_stamp2_got = true;
 		k_sem_give(&final_time_stamp);
@@ -427,8 +439,8 @@ void clkout_edge_task(const struct device *dev, struct gpio_callback *cb, uint32
 
 void initialize_rtc() {
 
-	timing_init();
-	timing_start();
+	//timing_init();
+	//timing_start();
 
 	// use port 0 pin 24 for CLKOE
 	// use port 0 pin 4 for CLKOUT
@@ -471,16 +483,24 @@ void rtc_task(void* p1, void* p2, void* p3) {
 
 	gpio_pin_set(gpio0_dev, 24, 0);
 
-	// WARNING THIS WILL NOT WORK WITHOUT A 64-bit timer!
-	// max value of uint32_t is 4,294,967,295. assuming clock speed of 80MHz, aka 12.5 ns per tick
-	// we are looking at a 53 second window before the clock rolls over.
-	// it's entirely possible to hit the end of this window within a 1s bound :(
+	// WARNING THIS WILL NOT WORK WITHOUT AN ACCURATE AND HIGH SPEED TIMER!
+	// max value of uint32_t is 4,294,967,295. nrf5240 has timer speed of 16Mhz, aka 62.5 ns per tick
+	// theoretically, it could work, but experiments have shown that with software abstractions,
+	// the typical calculated difference between active edge is roughly +/-0.5ms off of expected 1s period
+	// e.g when tracking a 16Mhz square wave it actually shows 16008071Hz this is way off of 10ppm error
+	// not sure why this is...
+	// BUT a logic analyzer shows that the rv8803 clkout is actually around 56ns off of expected 1s, sometimes more
+	// hence the it "could work" assertion.
+	// furthermore, the nrf52840 timer has 10ppm error, while for the rv8803, 
+	// 1.2ppm of compensation is roughly equivalent to offset of 5, where max offset is -32 -> +31
+	// this means you need a more sensitive clock than the rv8803! (which is not likely :/ )
 	
+	//uint64_t total_cycles = timing_cycles_get(&start_time, &end_time);
+	//uint64_t total_ns = timing_cycles_to_ns(total_cycles);
+	//uint32_t total_timer_diff = end_time_val - start_time_val;
+	//printk("timer diff: %d \r\n", total_timer_diff);
 	/*
-	uint64_t total_ns = timing_cycles_get(&time_stamp1, &time_stamp2);
-	uint64_t time_diff_ns = timing_cycles_to_ns(total_ns);
-	printk("time diff: %d \r\n", time_diff_ns);
-	double time_diff_hz = 1.0/(time_diff_ns / 1000000000.0);
+	double time_diff_hz = 1.0/((double)total_ns / 1000000000.0);
 	double offset = ((time_diff_hz - 1) * 1000000.0)/0.2384;
 	printk("offset: %d \r\n", (int)offset);
 
@@ -523,6 +543,28 @@ int main(void)
 {       
     //const struct device* drv2605_dev = DEVICE_DT_GET_ANY(ti_drv2605);
 	//const struct device* pca9548_dev = DEVICE_DT_GET_ANY(ti_pca9548);
+
+	// initialize a hardware timer here for the rtc calibration
+	/*
+	timer_t_inst.p_reg->PRESCALER = 0;
+    uint32_t base_frequency = NRF_TIMER_BASE_FREQUENCY_GET(timer_t_inst.p_reg);
+	printk("base frequency is: %d \r\n", base_frequency);
+    nrfx_timer_config_t config = NRFX_TIMER_DEFAULT_CONFIG(base_frequency);
+    config.bit_width = NRF_TIMER_BIT_WIDTH_32;
+    config.p_context = &timer_t_inst;
+    nrfx_err_t status = nrfx_timer_init(&timer_t_inst, &config, NULL);
+    NRFX_ASSERT(status == NRFX_SUCCESS);
+	nrfx_timer_clear(&timer_t_inst);
+	nrfx_timer_enable(&timer_t_inst);
+	*/
+
+	// use port 0, pin 25 as a debug pin
+	int configure_gpio = gpio_pin_configure(gpio0_dev, 25, GPIO_OUTPUT);
+	if(configure_gpio < 0) {
+		printk("can't configure debug pin 1\r\n");
+	}
+
+	gpio_pin_set(gpio0_dev, 25, 0);
 
 	if (!device_is_ready(led.port)) {
         printk("failure at initializing led device\r\n");
