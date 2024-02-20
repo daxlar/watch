@@ -28,4 +28,8 @@ manifest:
       path: modules/RV8803
       revision: refs/tags/barebones
       url: https://github.com/daxlar/rv8803
+    - name: MAX17048A
+      path: modules/MAX17048A
+      revision: refs/tags/initial
+      url: https://github.com/daxlar/max17048
 

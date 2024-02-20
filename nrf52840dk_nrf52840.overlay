@@ -40,10 +40,17 @@
         reg = <0x53>;
         status = "okay";
     };
-    */
+    
     rtclock: rtclock@32{
         compatible = "mc,rv8803";
         reg = <0x32>;
+        status = "okay";
+    };
+    */
+
+    fuel_gauge: fuel_gauge@36{
+        compatible = "maxim,max17048a";
+        reg = <0x36>;
         status = "okay";
     };
 };

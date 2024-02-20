@@ -13,6 +13,7 @@
 #include <sensor/drv2605/drv2605.h>
 #include <sensor/pca9548/pca9548.h>
 #include <sensor/rv8803/rv8803.h>
+#include <sensor/max17048a/max17048a.h>
 
 //#include <nrfx_timer.h>
 
@@ -28,6 +29,8 @@
 #define BUTTON_THREAD_PRIORITY 5
 #define RTC_THREAD_STACK_SIZE 500
 #define RTC_THREAD_PRIORITY 5
+#define FG_THREAD_STACK_SIZE 500
+#define FG_THREAD_PRIORITY 5
 
 K_THREAD_STACK_DEFINE(button_thread_stack_area, BUTTON_THREAD_STACK_SIZE);
 struct k_thread button_thread_data;
@@ -35,17 +38,22 @@ struct k_thread button_thread_data;
 K_THREAD_STACK_DEFINE(rtc_thread_stack_area, RTC_THREAD_STACK_SIZE);
 struct k_thread rtc_thread_data;
 
+K_THREAD_STACK_DEFINE(fg_thread_stack_area, FG_THREAD_STACK_SIZE);
+struct k_thread fg_thread_data;
+
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 static const struct gpio_dt_spec sw0 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
 static const struct gpio_dt_spec sw1 = GPIO_DT_SPEC_GET(SW1_NODE, gpios);
 //static const struct device* adxl343_dev = DEVICE_DT_GET_ANY(adi_adxl343);
 static const struct device* gpio0_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
-static const struct device* rv8803_dev = DEVICE_DT_GET_ANY(mc_rv8803);
+//static const struct device* rv8803_dev = DEVICE_DT_GET_ANY(mc_rv8803);
+static const struct device* max17048_dev = DEVICE_DT_GET_ANY(maxim_max17048a);
 
 static struct gpio_callback sw0_cb_data;
 static struct gpio_callback sw1_cb_data;
 //static struct gpio_callback acc_cb_data;
-static struct gpio_callback clk_cb_data;
+//static struct gpio_callback clk_cb_data;
+static struct gpio_callback fuel_gauge_cb_data;
 
 static k_tid_t button_task_tid;
 static k_tid_t rtc_task_tid;
@@ -59,6 +67,17 @@ uint32_t sw1_pressed_time_stamp = 0;
 K_SEM_DEFINE(final_time_stamp, 0, 1);
 
 //nrfx_timer_t timer_t_inst = NRFX_TIMER_INSTANCE(0);
+
+/**
+ * GPIO Pin usage list
+ * Port 0 pin 4  is clkout
+ * Port 0 pin 11 is sw1
+ * Port 0 pin 12 is sw2
+ * Port 0 pin 24 is clkoe
+ * Port 0 pin 25 is debug
+ * Port 0 pin 28 is accel int
+ * 
+*/
 
 void sw0_pressed_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
 	printk("Button pressed at sw0: %" PRIu32 "\n", k_cycle_get_32());
@@ -376,6 +395,7 @@ void acc_trigger_task(const struct device *dev, struct gpio_callback *cb, uint32
 }
 */
 
+/*
 int set_time(const struct device* rv8803_dev, int hours, int minutes) {
 
 	struct sensor_value time = {.val1 = hours, .val2 = minutes};
@@ -395,8 +415,9 @@ int get_time(const struct device* rv8803_dev, uint8_t* hours, uint8_t* minutes) 
 	*minutes = time.val2;
 	return 0;
 }
+*/
 
-
+/*
 //timing_t start_time;
 //timing_t end_time;
 
@@ -474,7 +495,8 @@ void initialize_rtc() {
 	}
 
 }
-
+*/
+/*
 void rtc_task(void* p1, void* p2, void* p3) {
 
 	printk("rtc task is active! \r\n");
@@ -499,20 +521,19 @@ void rtc_task(void* p1, void* p2, void* p3) {
 	//uint64_t total_ns = timing_cycles_to_ns(total_cycles);
 	//uint32_t total_timer_diff = end_time_val - start_time_val;
 	//printk("timer diff: %d \r\n", total_timer_diff);
-	/*
-	double time_diff_hz = 1.0/((double)total_ns / 1000000000.0);
-	double offset = ((time_diff_hz - 1) * 1000000.0)/0.2384;
-	printk("offset: %d \r\n", (int)offset);
+	
+	// double time_diff_hz = 1.0/((double)total_ns / 1000000000.0);
+	// double offset = ((time_diff_hz - 1) * 1000000.0)/0.2384;
+	// printk("offset: %d \r\n", (int)offset);
 
-	struct sensor_value calib_offset = {.val1 = offset, .val2 = 0};
-	int set_offset = sensor_attr_set(rv8803_dev, RV8803_INITIALIZE, RV8803_INITIALIZE_COMPUTE_OFFSET, &calib_offset);
-	if(set_offset) {
-		printk("having trouble starting offset calc! \r\n");
-	} else {
-		printk("set offset! \r\n");
-	}
-	*/
-
+	// struct sensor_value calib_offset = {.val1 = offset, .val2 = 0};
+	// int set_offset = sensor_attr_set(rv8803_dev, RV8803_INITIALIZE, RV8803_INITIALIZE_COMPUTE_OFFSET, &calib_offset);
+	// if(set_offset) {
+		// printk("having trouble starting offset calc! \r\n");
+	// } else {
+		// printk("set offset! \r\n");
+	// }
+	
 	int set_time_val = set_time(rv8803_dev, 21, 21);
 	if(set_time_val) {
 		printk("trouble setting the time \r\n");
@@ -537,6 +558,67 @@ void rtc_task(void* p1, void* p2, void* p3) {
 	while(1) {
 		k_msleep(1000);
 	}
+}
+*/
+
+void fg_thread(void* p1, void* p2, void* p3) {
+	irq_disable(6);
+	printk("at fuel gauge thread \r\n");
+
+	struct sensor_value status;
+	int start_offset_calc = sensor_channel_get(max17048_dev, MAX17048A_GET_STATUS, &status);
+	if(start_offset_calc) {
+		printk("trouble reading status at fuel gauge task \r\n");
+	}else {
+		printk("status: %d \r\n", status.val1);
+	}
+
+	struct sensor_value dummy;
+	int clear_int = sensor_attr_set(max17048_dev, MAX17048A_CLEAR_ALERT, MAX17048A_CLEAR_ALERT_START, &dummy);
+	if(clear_int) {
+		printk("trouble clearing int at fuel gauge task \r\n");
+	} else {
+		printk("resetting max pin int \r\n");
+	}
+}
+
+
+
+void fuel_gauge_task(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+
+	printk("at fuel gauge task \r\n");
+	
+	k_thread_create(&fg_thread_data, fg_thread_stack_area,
+					K_THREAD_STACK_SIZEOF(fg_thread_stack_area),
+					fg_thread,
+					NULL, NULL, NULL,
+					FG_THREAD_PRIORITY, 0, K_NO_WAIT);
+
+}
+
+int initialize_fuel_gauge_alert_pin() {
+	int configure_gpio = gpio_pin_configure(gpio0_dev, 2, GPIO_INPUT);
+	if(configure_gpio < 0) {
+		printk("can't configure fuel_gauge pin \r\n");
+	}
+
+	configure_gpio = gpio_pin_interrupt_configure(gpio0_dev, 2, GPIO_INT_EDGE_TO_INACTIVE);
+	if (configure_gpio < 0) {
+		printk("Failed to configure interrupt for clkout pin \r\n");
+	}
+
+	gpio_init_callback(&fuel_gauge_cb_data, fuel_gauge_task, BIT(2));
+	configure_gpio = gpio_add_callback(gpio0_dev, &fuel_gauge_cb_data);
+	if (configure_gpio < 0) {
+		printk("Failed to add callback for clkout pin \r\n");
+	}
+	return 0;
+}
+
+int initialize_fuel_gauge() {
+	struct sensor_value dummy;
+	int start_offset_calc = sensor_attr_set(max17048_dev, MAX17048A_INITIALIZE, MAX17048A_INITIALIZE_START, &dummy);
+	return start_offset_calc;
 }
 
 int main(void)
@@ -589,7 +671,35 @@ int main(void)
 	} else {
 		printk("switches are initialized \r\n");
 	}
+	
+	int init_fg = initialize_fuel_gauge();
+	if(init_fg < 0) {
+		printk("problems initializing fuel_gauge \r\n");
+	} else {
+		printk("initialized fuel_gauge \r\n");
+	}
 
+	int init_fg_pin = initialize_fuel_gauge_alert_pin();
+	if(init_fg_pin < 0) {
+		printk("problems initializing fuel_gauge pins\r\n");
+	} else {
+		printk("initialized fuel_gauge alert pin\r\n");
+	}
+
+	if(gpio_pin_get(gpio0_dev, 2) == 0) {
+		printk("main task resetting max int \r\n");
+		irq_disable(6);
+		struct sensor_value dummy;
+		int clear_int = sensor_attr_set(max17048_dev, MAX17048A_CLEAR_ALERT, MAX17048A_CLEAR_ALERT_START, &dummy);
+		if(clear_int) {
+			printk("trouble clearing int at fuel gauge task \r\n");
+		} else {
+			printk("resettting max pin int \r\n");
+		}
+		irq_enable(6);
+	}
+
+	/*
 	rtc_task_tid = k_thread_create(&rtc_thread_data, rtc_thread_stack_area,
 										K_THREAD_STACK_SIZEOF(rtc_thread_stack_area),
 										rtc_task,
@@ -597,6 +707,7 @@ int main(void)
 										RTC_THREAD_PRIORITY, 0, K_NO_WAIT);
 
 	initialize_rtc();
+	*/
 
 	/*
 	int init_accelerometer = initialize_accelerometer(adxl343_dev);
@@ -662,6 +773,24 @@ int main(void)
 		
 		k_msleep(SLEEP_TIME_MS);
 		*/
+		
+		struct sensor_value sensor_val;
+		int get_soc = sensor_channel_get(max17048_dev, MAX17048A_GET_SOC, &sensor_val);
+		if(get_soc) {
+			printk("trouble getting soc data \r\n");
+		} else {
+			printk("soc: %d \r\n", sensor_val.val1);
+		}
+
+		int get_crate = sensor_channel_get(max17048_dev, MAX17048A_GET_CHARGE_RATE, &sensor_val);
+		if(get_crate) {
+			printk("trouble getting crate data \r\n");
+		} else {
+			printk("charge rate: %d \r\n", sensor_val.val1);
+		}
+		
+		irq_enable(6);
+
 		k_msleep(SLEEP_DURATION_MS);
 	}
 
